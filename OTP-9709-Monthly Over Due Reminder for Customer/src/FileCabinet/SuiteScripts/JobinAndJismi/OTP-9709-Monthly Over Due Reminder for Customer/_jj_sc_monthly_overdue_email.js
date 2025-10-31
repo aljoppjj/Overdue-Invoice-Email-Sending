@@ -5,8 +5,13 @@
 
 define(['N/search', 'N/email', 'N/file', 'N/runtime', 'N/record', 'N/log'],
     function (search, email, file, runtime, record, log) {
-        function execute() {
 
+        /**
+         * Executes the scheduled script to find overdue invoices and email customers with CSV attachments.
+         * 
+         * @returns {void}
+         */
+        function execute() {
             log.audit('Script Started');
 
             const invoiceSearch = search.create({
@@ -78,11 +83,11 @@ define(['N/search', 'N/email', 'N/file', 'N/runtime', 'N/record', 'N/log'],
                         continue;
                     }
 
-                    var senderId = -5;
+                    let senderId = -5;
                     if (salesRepId) {
                         try {
-                            var salesRepRecord = record.load({ type: record.Type.EMPLOYEE, id: salesRepId });
-                            var salesRepEmail = salesRepRecord.getValue('email');
+                            const salesRepRecord = record.load({ type: record.Type.EMPLOYEE, id: salesRepId });
+                            const salesRepEmail = salesRepRecord.getValue('email');
                             if (salesRepEmail) {
                                 senderId = salesRepId;
                             } else {
@@ -92,8 +97,6 @@ define(['N/search', 'N/email', 'N/file', 'N/runtime', 'N/record', 'N/log'],
                             log.error('Sales Rep Load Error', `Could not load sales rep record for ID ${salesRepId}: ${e.message}`);
                         }
                     }
-
-                    
 
                     log.audit('Preparing Email', `Customer: ${customerName}, Email: ${customerEmail}, Sender ID: ${senderId}`);
 
