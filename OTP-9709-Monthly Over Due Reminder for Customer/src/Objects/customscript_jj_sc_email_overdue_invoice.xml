@@ -1,0 +1,25 @@
+<scheduledscript scriptid="customscript_jj_sc_email_overdue_invoice">
+  <description></description>
+  <isinactive>F</isinactive>
+  <name>JJ SC Email Overdue Invoices Monthly</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptfile>[/SuiteScripts/JobinAndJismi/_jj_sc_monthly_overdue_email.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_jj_sc_email_overdue_invoice">
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <status>NOTSCHEDULED</status>
+      <title>JJ SC Email Overdue Invoices Monthly</title>
+      <recurrence>
+        <monthly>
+          <everyxmonths>1</everyxmonths>
+          <repeat></repeat>
+          <startdate>2025-10-02</startdate>
+          <starttime>01:00:00Z</starttime>
+        </monthly>
+      </recurrence>
+    </scriptdeployment>
+  </scriptdeployments>
+</scheduledscript>

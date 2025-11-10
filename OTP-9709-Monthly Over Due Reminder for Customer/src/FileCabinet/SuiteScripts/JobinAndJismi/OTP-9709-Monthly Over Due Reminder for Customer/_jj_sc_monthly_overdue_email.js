@@ -2,6 +2,28 @@
  * @NApiVersion 2.1
  * @NScriptType ScheduledScript
  */
+ 
+/************************************************************************************************
+ *  
+ * OTP-9709 : Monthly Sales Notification for Sales Rep
+ *
+*************************************************************************************************
+ *
+ * Author: Jobin and Jismi IT Services
+ *
+ * Date Created : 29-October-2025
+ *
+ * Description : This script Sends monthly emails to customers with all overdue invoices 
+ *               (till previous month) as a CSV,using Sales Rep or Admin as sender.(If
+ *                sales rep doesnt have mailid then use admin mail)
+ *                  
+ *                 
+ *
+ * REVISION HISTORY
+ *
+ * @version 1.0 : 29-October-2025 :  The initial build was created by JJ0417
+ *
+*************************************************************************************************/
 
 define(['N/search', 'N/email', 'N/file', 'N/runtime', 'N/record', 'N/log'],
     function (search, email, file, runtime, record, log) {
