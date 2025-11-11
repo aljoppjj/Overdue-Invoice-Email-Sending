@@ -25,127 +25,233 @@
  *
 *************************************************************************************************/
 
-define(['N/search', 'N/email', 'N/file', 'N/runtime', 'N/record', 'N/log'],
-    function (search, email, file, runtime, record, log) {
-        function execute() {
+define(['N/search', 'N/email', 'N/file', 'N/log'],
+    function (search, email, file, log) {
 
-            log.audit('Script Started');
+        /**
+         * Main execution function for scheduled script
+         * Searches for overdue invoices and sends email notifications to customers
+         * @param {Object} context - Script context object
+         */
+        function execute(context) {
+            try {
+                log.audit('Script Started', 'Monthly Overdue Invoice Email Notification');
 
-            const invoiceSearch = search.create({
-                type: search.Type.INVOICE,
-                filters: [
-                    ['status', 'anyof', 'CustInvc:A'],
-                    'AND',
-                    ['duedate', 'before', 'lastmonth']
-                ],
-                columns: [
-                    'entity',
-                    'tranid',
-                    'amount',
-                    'duedate',
-                    'salesrep'
-                ]
-            });
+                const customerInvoices = searchOverdueInvoices();
 
-            const customerInvoices = {};
-            const invoiceResults = invoiceSearch.run();
-            let invoiceCount = 0;
-
-            invoiceResults.each(function (result) {
-                const customerId = result.getValue('entity');
-                if (!customerId) {
-                    log.error('Missing Customer ID', 'Skipping invoice with no customer ID.');
-                    return true;
+                if (Object.keys(customerInvoices).length === 0) {
+                    log.audit('No Invoices Found', 'No overdue invoices were found for the previous month.');
+                    return;
                 }
 
-                invoiceCount++;
+                log.audit('Customers to Notify', `Total customers with overdue invoices: ${Object.keys(customerInvoices).length}`);
 
-                const invoiceNumber = result.getValue('tranid');
-                const amount = result.getValue('amount');
-                const dueDate = new Date(result.getValue('duedate'));
-                const daysOverdue = Math.floor((new Date() - dueDate) / (1000 * 60 * 60 * 24));
+                processCustomerNotifications(customerInvoices);
 
-                log.debug('Invoice Found', `Customer ID: ${customerId}, Invoice: ${invoiceNumber}, Amount: ${amount}, Days Overdue: ${daysOverdue}`);
+                log.audit('Script End', 'Overdue Invoice Email Notification script completed successfully.');
 
-                if (!customerInvoices[customerId]) {
-                    customerInvoices[customerId] = [];
-                }
-
-                customerInvoices[customerId].push({
-                    invoiceNumber,
-                    amount,
-                    daysOverdue
-                });
-
-                return true;
-            });
-
-            if (invoiceCount === 0) {
-                log.audit('No Invoices Found', 'No overdue invoices were found for the previous month.');
-                return;
+            } catch (e) {
+                log.error('Script Execution Error', `Fatal error in execute function: ${e.message}`);
+                throw e;
             }
-
-            log.audit('Invoices Found', `Total overdue invoices: ${invoiceCount}`);
-            log.audit('Customers to Notify', `Total customers with overdue invoices: ${Object.keys(customerInvoices).length}`);
-
-            for (const customerId in customerInvoices) {
-                try {
-                    const customerRecord = record.load({ type: record.Type.CUSTOMER, id: customerId });
-                    const customerName = customerRecord.getValue('companyname') || customerRecord.getValue('firstname');
-                    const customerEmail = customerRecord.getValue('email');
-                    const salesRepId = customerRecord.getValue('salesrep');
-
-                    if (!customerEmail) {
-                        log.error('Missing Email', `Customer ${customerName} (ID: ${customerId}) has no email. Skipping.`);
-                        continue;
-                    }
-
-                    var senderId = -5;
-                    if (salesRepId) {
-                        try {
-                            var salesRepRecord = record.load({ type: record.Type.EMPLOYEE, id: salesRepId });
-                            var salesRepEmail = salesRepRecord.getValue('email');
-                            if (salesRepEmail) {
-                                senderId = salesRepId;
-                            } else {
-                                log.audit('Sales Rep Missing Email', `Sales rep for customer ${customerName} has no email. Using admin ID.`);
-                            }
-                        } catch (e) {
-                            log.error('Sales Rep Load Error', `Could not load sales rep record for ID ${salesRepId}: ${e.message}`);
-                        }
-                    }
-
-                    
-
-                    log.audit('Preparing Email', `Customer: ${customerName}, Email: ${customerEmail}, Sender ID: ${senderId}`);
-
-                    let csvContent = 'Invoice Number,Amount,Days Overdue\n';
-                    customerInvoices[customerId].forEach(inv => {
-                        csvContent += `${inv.invoiceNumber},${inv.amount},${inv.daysOverdue}\n`;
-                    });
-
-                    const csvFile = file.create({
-                        name: `Overdue_Invoices_${customerName}.csv`,
-                        fileType: file.Type.CSV,
-                        contents: csvContent
-                    });
-
-                    email.send({
-                        author: senderId,
-                        recipients: customerEmail,
-                        subject: 'Overdue Invoice Notification',
-                        body: `Dear ${customerName},\n\nPlease find attached your overdue invoices`,
-                        attachments: [csvFile]
-                    });
-
-                    log.audit('Email Sent', `Email sent to ${customerEmail} with ${customerInvoices[customerId].length} overdue invoices.`);
-                } catch (e) {
-                    log.error('Email Error', `Failed to send email to customer ID ${customerId}: ${e.message}`);
-                }
-            }
-
-            log.audit('Script End', 'Overdue Invoice Email Notification script completed.');
         }
 
-        return { execute };
+        /**
+         * Searches for all overdue invoices till last month
+         * @returns {Object} Object with customer IDs as keys and array of invoice details as values
+         */
+        function searchOverdueInvoices() {
+            try {
+                const invoiceSearch = search.create({
+                    type: search.Type.INVOICE,
+                    filters: [
+                        ['status', 'anyof', 'CustInvc:A'],
+                        'AND',
+                        ['duedate', 'before', 'lastmonth'],
+                        'AND',
+                        ['mainline', 'is', 'T']
+                    ],
+                    columns: ['entity', 'tranid', 'amount', 'duedate']
+                });
+
+                const customerInvoices = {};
+                const invoiceResults = invoiceSearch.run();
+                let invoiceCount = 0;
+                const processedInvoices = {};
+
+                invoiceResults.each(function (result) {
+                    try {
+                        const customerId = result.getValue('entity');
+                        const invoiceNumber = result.getValue('tranid');
+
+                        if (!customerId) {
+                            return true;
+                        }
+
+                        const invoiceKey = `${customerId}_${invoiceNumber}`;
+                        if (processedInvoices[invoiceKey]) {
+                            return true;
+                        }
+                        processedInvoices[invoiceKey] = true;
+
+                        invoiceCount++;
+
+                        const amount = result.getValue('amount');
+                        const dueDate = new Date(result.getValue('duedate'));
+                        const daysOverdue = Math.floor((new Date() - dueDate) / (1000 * 60 * 60 * 24));
+
+                        if (!customerInvoices[customerId]) {
+                            customerInvoices[customerId] = [];
+                        }
+
+                        customerInvoices[customerId].push({
+                            invoiceNumber: invoiceNumber,
+                            amount: amount,
+                            daysOverdue: daysOverdue
+                        });
+
+                        return true;
+                    } catch (e) {
+                        log.error('Invoice Processing Error', `Error processing invoice: ${e.message}`);
+                        return true;
+                    }
+                });
+
+                log.audit('Invoices Found', `Total unique overdue invoices: ${invoiceCount}`);
+                
+
+                for (const customerId in customerInvoices) {
+                    log.audit('Customer Invoices', `Customer ID ${customerId}: ${customerInvoices[customerId].length} invoices - ${customerInvoices[customerId].map(inv => inv.invoiceNumber).join(', ')}`);
+                }
+
+                return customerInvoices;
+
+            } catch (e) {
+                log.error('Search Error', `Error searching overdue invoices: ${e.message}`);
+                throw e;
+            }
+        }
+
+        /**
+         * Processes and sends email notifications to all customers with overdue invoices
+         * @param {Object} customerInvoices - Object containing customer IDs and their invoice details
+         */
+        function processCustomerNotifications(customerInvoices) {
+            for (const customerId in customerInvoices) {
+                try {
+                    sendCustomerEmail(customerId, customerInvoices[customerId]);
+                } catch (e) {
+                    log.error('Customer Processing Error', `Failed to process customer ID ${customerId}: ${e.message}`);
+                }
+            }
+        }
+
+        /**
+         * Sends email notification to a specific customer with their overdue invoices
+         * @param {string} customerId - NetSuite internal ID of the customer
+         * @param {Array} invoices - Array of invoice objects containing invoice details
+         */
+        function sendCustomerEmail(customerId, invoices) {
+            try {
+                const customerFields = search.lookupFields({
+                    type: search.Type.CUSTOMER,
+                    id: customerId,
+                    columns: ['companyname', 'firstname', 'email', 'salesrep']
+                });
+
+                const customerName = customerFields.companyname || customerFields.firstname || 'Customer';
+                const customerEmail = customerFields.email;
+                const salesRepId = customerFields.salesrep && customerFields.salesrep.length > 0 ? customerFields.salesrep[0].value : null;
+
+                if (!customerEmail) {
+                    log.error('Missing Email', `Customer ${customerName} (ID: ${customerId}) has no email. Skipping.`);
+                    return;
+                }
+
+                const senderId = getSenderId(salesRepId, customerName);
+                const csvFile = createCSVFile(customerName, customerEmail, invoices);
+
+                email.send({
+                    author: senderId,
+                    recipients: customerEmail,
+                    subject: 'Overdue Invoice Notification',
+                    body: `Dear ${customerName},\n\nPlease find attached your overdue invoices.`,
+                    attachments: [csvFile]
+                });
+
+                log.audit('Email Sent', `Email sent to ${customerEmail} with ${invoices.length} overdue invoices.`);
+
+            } catch (e) {
+                log.error('Email Send Error', `Failed to send email to customer ID ${customerId}: ${e.message}`);
+                throw e;
+            }
+        }
+
+        /**
+         * Determines the sender ID for the email (Sales Rep or Admin)
+         * @param {string} salesRepId - NetSuite internal ID of the sales rep
+         * @param {string} customerName - Name of the customer (for logging)
+         * @returns {number} Sender ID (-5 for admin or sales rep ID)
+         */
+        function getSenderId(salesRepId, customerName) {
+            try {
+                if (!salesRepId) {
+                    return -5;
+                }
+
+                const salesRepFields = search.lookupFields({
+                    type: search.Type.EMPLOYEE,
+                    id: salesRepId,
+                    columns: ['email']
+                });
+
+                const salesRepEmail = salesRepFields.email;
+
+                if (salesRepEmail) {
+                    return parseInt(salesRepId);
+                } else {
+                    log.audit('Sales Rep Missing Email', `Sales rep for customer ${customerName} has no email. Using admin ID.`);
+                    return -5;
+                }
+
+            } catch (e) {
+                log.error('Sales Rep Load Error', `Could not load sales rep record for ID ${salesRepId}: ${e.message}`);
+                return -5;
+            }
+        }
+
+        /**
+         * Creates a CSV file with overdue invoice details
+         * @param {string} customerName - Name of the customer
+         * @param {string} customerEmail - Email of the customer
+         * @param {Array} invoices - Array of invoice objects
+         * @returns {File} NetSuite file object containing CSV data
+         */
+        function createCSVFile(customerName, customerEmail, invoices) {
+            try {
+                let csvContent = 'Customer Name,Customer Email,Invoice Document Number,Invoice Amount,Days Overdue\n';
+
+                invoices.forEach(function(inv) {
+                    csvContent += `"${customerName}","${customerEmail}",${inv.invoiceNumber},${inv.amount},${inv.daysOverdue}\n`;
+                });
+
+                const csvFile = file.create({
+                    name: `Overdue_Invoices_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.csv`,
+                    fileType: file.Type.CSV,
+                    contents: csvContent,
+                    folder: 1226
+                });
+
+                const fileId = csvFile.save();
+                log.debug('CSV File Created', `File ID: ${fileId} for customer ${customerName}`);
+
+                return file.load({ id: fileId });
+
+            } catch (e) {
+                log.error('CSV Creation Error', `Error creating CSV file for ${customerName}: ${e.message}`);
+                throw e;
+            }
+        }
+
+        return { execute: execute };
     });
