@@ -233,7 +233,7 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
          * Creates a CSV file with overdue invoice details
          * @param {string} customerName - Name of the customer
          * @param {string} customerEmail - Email of the customer
-         * @param {Array} invoices - Array of invoice objects
+         * @param {Array} invoices - Array of invoice object
          * @returns {File} NetSuite file object containing CSV data
          */
         function createCSVFile(customerName, customerEmail, invoices) {
