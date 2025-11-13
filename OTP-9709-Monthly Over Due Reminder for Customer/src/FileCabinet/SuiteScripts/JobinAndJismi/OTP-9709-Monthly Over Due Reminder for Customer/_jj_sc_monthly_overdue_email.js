@@ -31,9 +31,8 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
         /**
          * Main execution function for scheduled script
          * Searches for overdue invoices and sends email notifications to customers
-         * @param {Object} context - Script context object
          */
-        function execute(context) {
+        function execute() {
             try {
                 log.audit('Script Started', 'Monthly Overdue Invoice Email Notification');
 
@@ -69,7 +68,9 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
                         'AND',
                         ['duedate', 'before', 'lastmonth'],
                         'AND',
-                        ['mainline', 'is', 'T']
+                        ['mainline', 'is', 'T'],
+                        'AND',
+                        ['customer.isinactive', 'is', 'F'] 
                     ],
                     columns: ['entity', 'tranid', 'amount', 'duedate']
                 });
@@ -171,11 +172,12 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
                 const senderId = getSenderId(salesRepId, customerName);
                 const csvFile = createCSVFile(customerName, customerEmail, invoices);
 
+
                 email.send({
                     author: senderId,
                     recipients: customerEmail,
                     subject: 'Overdue Invoice Notification',
-                    body: `Dear ${customerName},\n\nPlease find attached your overdue invoices.`,
+                    body: `Dear ${customerName},\n\nPlease find attached your overdue invoices.\n\nBest regards,\nAccounts Team`,
                     attachments: [csvFile]
                 });
 
@@ -189,6 +191,7 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
 
         /**
          * Determines the sender ID for the email (Sales Rep or Admin)
+         * Checks if sales rep is active and has email before using them as sender
          * @param {string} salesRepId - NetSuite internal ID of the sales rep
          * @param {string} customerName - Name of the customer (for logging)
          * @returns {number} Sender ID (-5 for admin or sales rep ID)
@@ -202,10 +205,16 @@ define(['N/search', 'N/email', 'N/file', 'N/log'],
                 const salesRepFields = search.lookupFields({
                     type: search.Type.EMPLOYEE,
                     id: salesRepId,
-                    columns: ['email']
+                    columns: ['email', 'isinactive']
                 });
 
                 const salesRepEmail = salesRepFields.email;
+                const isInactive = salesRepFields.isinactive;
+
+                if (isInactive) {
+                    log.audit('Sales Rep Inactive', `Sales rep for customer ${customerName} is inactive. Using admin ID.`);
+                    return -5;
+                }
 
                 if (salesRepEmail) {
                     return parseInt(salesRepId);
